@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import pb from '$lib/pocketbase';
+	import { onMount } from 'svelte';
+	import { orders, orderItems, customers, products } from '$lib/stores/dataStore';
 
 	// Date Range Filter
-	let dateRange = 'last30'; // 'last30', 'today', 'all', 'custom'
+	let dateRange = 'last30'; // 'last30', 'lastWeek', 'today', 'all', 'custom'
 	let customStartDate = '';
 	let customEndDate = '';
 	let showDatePicker = false;
@@ -13,6 +13,7 @@
 	let totalRevenue = 0;
 	let totalCustomers = 0;
 	let topSellingProduct = { name: '', quantity: 0 };
+	let allTimeTopProduct = { name: '', quantity: 0 };
 
 	// KPI Data
 	let kpis = [
@@ -106,6 +107,13 @@
 			startDate.setHours(0, 0, 0, 0);
 			endDate = new Date(now);
 			endDate.setHours(23, 59, 59, 999);
+		} else if (dateRange === 'lastWeek') {
+			// Last 7 days (including today)
+			startDate = new Date(now);
+			startDate.setDate(startDate.getDate() - 6); // 7 days including today
+			startDate.setHours(0, 0, 0, 0);
+			endDate = new Date(now);
+			endDate.setHours(23, 59, 59, 999);
 		} else if (dateRange === 'last30') {
 			startDate = new Date(now);
 			startDate.setDate(startDate.getDate() - 30);
@@ -129,32 +137,38 @@
 	function filterByDateRange(items: any[]): any[] {
 		const { startDate, endDate } = getDateRange();
 		return items.filter((item) => {
-			const itemDate = new Date(item.created);
+			// Use date field if available, fallback to created for backward compatibility
+			const itemDate = new Date(item.date || item.created);
 			return itemDate >= startDate && itemDate <= endDate;
 		});
 	}
 
-	async function loadInitialData() {
-		try {
-			// Load order_items with product expansion
-			const orderItems = await pb.collection('order_items').getList(1, 500, {
-				expand: 'product'
-			});
+	// Data from stores - these are reactive and update automatically
+	let currentOrders: any[] = [];
+	let currentOrderItems: any[] = [];
+	let currentCustomers: any[] = [];
+	let currentProducts: any[] = [];
 
-			// Load products
-			const products = await pb.collection('products').getList(1, 500);
+	// Subscribe to stores and update local state
+	orders.subscribe(value => {
+		currentOrders = value;
+		updateAllMetrics(currentOrderItems, currentProducts, currentCustomers, currentOrders);
+	});
 
-			// Load customers
-			const customers = await pb.collection('customers').getList(1, 500);
+	orderItems.subscribe(value => {
+		currentOrderItems = value;
+		updateAllMetrics(currentOrderItems, currentProducts, currentCustomers, currentOrders);
+	});
 
-			// Load orders
-			const orders = await pb.collection('orders').getList(1, 500);
+	customers.subscribe(value => {
+		currentCustomers = value;
+		updateAllMetrics(currentOrderItems, currentProducts, currentCustomers, currentOrders);
+	});
 
-			updateAllMetrics(orderItems.items, products.items, customers.items, orders.items);
-		} catch (error) {
-			console.error('Error loading initial data:', error);
-		}
-	}
+	products.subscribe(value => {
+		currentProducts = value;
+		updateAllMetrics(currentOrderItems, currentProducts, currentCustomers, currentOrders);
+	});
 
 	async function updateAllMetrics(orderItems: any[], products: any[], customers: any[], orders: any[]) {
 		// Apply date range filter to relevant data
@@ -172,19 +186,21 @@
 
 		// Filter today's and yesterday's orders
 		const todaysOrders = filteredOrders.filter(o => {
-			const orderDate = new Date(o.created);
+			// Use date field if available, fallback to created for backward compatibility
+			const orderDate = new Date(o.date || o.created);
 			orderDate.setHours(0, 0, 0, 0);
 			return orderDate.getTime() === today.getTime();
 		});
 
 		const yesterdaysOrders = filteredOrders.filter(o => {
-			const orderDate = new Date(o.created);
+			// Use date field if available, fallback to created for backward compatibility
+			const orderDate = new Date(o.date || o.created);
 			orderDate.setHours(0, 0, 0, 0);
 			return orderDate.getTime() === yesterday.getTime();
 		});
 
-		// Calculate Total Orders
-		totalOrders = todaysOrders.length;
+		// Calculate Total Orders - use filtered orders (based on selected date range)
+		totalOrders = filteredOrders.length;
 		const yesterdayOrders = yesterdaysOrders.length;
 		const orderChange = totalOrders - yesterdayOrders;
 		const orderPercentChange = yesterdayOrders > 0 ? Math.round((orderChange / yesterdayOrders) * 100) : (totalOrders > 0 ? 100 : 0);
@@ -195,8 +211,8 @@
 		kpis[0].isPositive = orderChange >= 0;
 		kpis[0].allTimeValue = allTimeOrders.toLocaleString();
 
-		// Calculate Total Revenue (sum of all invoice amounts)
-		totalRevenue = todaysOrders.reduce((sum, order) => sum + (order.invoice_amount || 0), 0);
+		// Calculate Total Revenue (sum of all invoice amounts in filtered date range)
+		totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.invoice_amount || 0), 0);
 		const yesterdayRevenue = yesterdaysOrders.reduce((sum, order) => sum + (order.invoice_amount || 0), 0);
 		const revenueChange = totalRevenue - yesterdayRevenue;
 		const revenuePercentChange = yesterdayRevenue > 0 ? Math.round((revenueChange / yesterdayRevenue) * 100) : (totalRevenue > 0 ? 100 : 0);
@@ -246,7 +262,8 @@
 		
 		// Sum revenue by day from filtered orders
 		filteredOrders.forEach((order) => {
-			const orderDate = new Date(order.created);
+			// Use date field if available, fallback to created for backward compatibility
+			const orderDate = new Date(order.date || order.created);
 			orderDate.setHours(0, 0, 0, 0);
 			
 			const dayLabel = orderDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -303,12 +320,50 @@
 			.sort((a, b) => b.value - a.value)
 			.slice(0, 4); // Top 4 products
 
-		// Find top-selling product
+		// Calculate all-time top product (using all orderItems, not filtered)
+		const allTimeProductQuantities = new Map<string, { name: string; quantity: number }>();
+		orderItems.forEach((item) => {
+			const product = products.find(p => p.id === item.product);
+			if (product) {
+				const key = `${product.name} ${product.size}`;
+				const existing = allTimeProductQuantities.get(key);
+				if (existing) {
+					existing.quantity += item.quantity;
+				} else {
+					allTimeProductQuantities.set(key, {
+						name: key,
+						quantity: item.quantity
+					});
+				}
+			}
+		});
+
+		// Find all-time top product
+		const allTimeProducts = Array.from(allTimeProductQuantities.values())
+			.sort((a, b) => b.quantity - a.quantity);
+		
+		if (allTimeProducts.length > 0) {
+			allTimeTopProduct = allTimeProducts[0];
+		}
+
+		// Find top-selling product for the selected date range
 		if (productMix.length > 0) {
 			const topProduct = productMix[0];
 			topSellingProduct = { name: topProduct.name, quantity: topProduct.value };
 			kpis[2].value = topProduct.name;
-			kpis[2].subtext = `${productMix[0].value}% of sales`;
+			// Show percentage for selected range, and all-time best below
+			if (allTimeTopProduct.name) {
+				kpis[2].subtext = `${productMix[0].value}% of sales (All-time: ${allTimeTopProduct.name})`;
+			} else {
+				kpis[2].subtext = `${productMix[0].value}% of sales`;
+			}
+		} else {
+			kpis[2].value = 'No data';
+			if (allTimeTopProduct.name) {
+				kpis[2].subtext = `All-time: ${allTimeTopProduct.name}`;
+			} else {
+				kpis[2].subtext = '';
+			}
 		}
 
 		// Calculate Total Customers (count unique customers in filtered orders)
@@ -325,7 +380,7 @@
 		kpis[3].isPositive = customerChange >= 0;
 		kpis[3].allTimeValue = allTimeCustomers.toLocaleString();
 
-		// Calculate Top 10 Customers by total quantity
+		// Calculate Top 10 Customers by total quantity (sum of all order item quantities)
 		const customerQuantities = new Map<string, { id: string; name: string; quantity: number }>();
 		filteredOrderItems.forEach((item) => {
 			const order = filteredOrders.find(o => o.id === item.order);
@@ -334,6 +389,7 @@
 				if (customer) {
 					const existing = customerQuantities.get(customer.id);
 					if (existing) {
+						// Sum the quantities (e.g., 10 + 20 + 30 = 60)
 						existing.quantity += item.quantity;
 					} else {
 						customerQuantities.set(customer.id, {
@@ -396,23 +452,26 @@
 			? Math.max(...topProductsByRevenue.map(p => p.revenue), 0) 
 			: 0;
 
-		// Calculate Sales by Region (from customer locations)
-		const regionQuantities = new Map<string, number>();
+		// Calculate Sales by Address (from customer addresses)
+		// Groups sales by customer address - if multiple customers have the same address (e.g., "Karatina"), they're grouped together
+		const addressQuantities = new Map<string, number>();
 		filteredOrderItems.forEach((item) => {
 			const order = filteredOrders.find(o => o.id === item.order);
 			if (order) {
 				const customer = customers.find(c => c.id === order.customer);
-				if (customer && customer.region) {
-					regionQuantities.set(
-						customer.region,
-						(regionQuantities.get(customer.region) || 0) + item.quantity
+				if (customer && customer.address) {
+					// Use address as the key - addresses like "Karatina" will be grouped together
+					const address = customer.address.trim();
+					addressQuantities.set(
+						address,
+						(addressQuantities.get(address) || 0) + item.quantity
 					);
 				}
 			}
 		});
 
-		salesByRegion = Array.from(regionQuantities.entries())
-			.map(([region, bales]) => ({ region, bales }))
+		salesByRegion = Array.from(addressQuantities.entries())
+			.map(([address, bales]) => ({ region: address, bales }))
 			.sort((a, b) => b.bales - a.bales);
 
 		// Calculate Order Status Distribution
@@ -431,7 +490,12 @@
 
 		// Update Recent Orders
 		recentOrders = filteredOrders
-			.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime())
+			.sort((a, b) => {
+				// Use date field if available, fallback to created for backward compatibility
+				const dateA = new Date(a.date || a.created).getTime();
+				const dateB = new Date(b.date || b.created).getTime();
+				return dateB - dateA;
+			})
 			.slice(0, 7)
 			.map((order) => {
 				const customer = customers.find(c => c.id === order.customer);
@@ -448,9 +512,10 @@
 					order.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800';
 
 				return {
-					date: new Date(order.created).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+					// Use date field if available, fallback to created for backward compatibility
+					date: new Date(order.date || order.created).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
 					customer: customer?.name || 'Unknown',
-					region: customer?.region || 'Unknown',
+					address: customer?.address || 'Unknown',
 					items: itemsText,
 					status: order.status || 'Pending',
 					statusColor
@@ -467,78 +532,15 @@
 		recentOrders = recentOrders;
 	}
 
-	onMount(async () => {
-		try {
-			await loadInitialData();
-
-			// Subscribe to order_items changes
-			pb.collection('order_items').subscribe('*', async function (e: any) {
-				console.log('order_items event:', e.action);
-				// Reload data when order_items change
-				const orderItems = await pb.collection('order_items').getList(1, 500, { expand: 'product' });
-				const products = await pb.collection('products').getList(1, 500);
-				const customers = await pb.collection('customers').getList(1, 500);
-				const orders = await pb.collection('orders').getList(1, 500);
-				updateAllMetrics(orderItems.items, products.items, customers.items, orders.items);
-			});
-
-			// Subscribe to products changes
-			pb.collection('products').subscribe('*', async function (e: any) {
-				console.log('products event:', e.action);
-				const orderItems = await pb.collection('order_items').getList(1, 500, { expand: 'product' });
-				const products = await pb.collection('products').getList(1, 500);
-				const customers = await pb.collection('customers').getList(1, 500);
-				const orders = await pb.collection('orders').getList(1, 500);
-				updateAllMetrics(orderItems.items, products.items, customers.items, orders.items);
-			});
-
-			// Subscribe to customers changes
-			pb.collection('customers').subscribe('*', async function (e: any) {
-				console.log('customers event:', e.action);
-				const orderItems = await pb.collection('order_items').getList(1, 500, { expand: 'product' });
-				const products = await pb.collection('products').getList(1, 500);
-				const customers = await pb.collection('customers').getList(1, 500);
-				const orders = await pb.collection('orders').getList(1, 500);
-				updateAllMetrics(orderItems.items, products.items, customers.items, orders.items);
-			});
-
-			// Subscribe to orders changes
-			pb.collection('orders').subscribe('*', async function (e: any) {
-				console.log('orders event:', e.action);
-				const orderItems = await pb.collection('order_items').getList(1, 500, { expand: 'product' });
-				const products = await pb.collection('products').getList(1, 500);
-				const customers = await pb.collection('customers').getList(1, 500);
-				const orders = await pb.collection('orders').getList(1, 500);
-				updateAllMetrics(orderItems.items, products.items, customers.items, orders.items);
-			});
-		} catch (error) {
-			console.error('Error setting up real-time dashboard:', error);
-		}
-	});
-
-	onDestroy(() => {
-		// Clean up all subscriptions
-		pb.collection('order_items').unsubscribe();
-		pb.collection('products').unsubscribe();
-		pb.collection('customers').unsubscribe();
-		pb.collection('orders').unsubscribe();
-	});
+	// No need for onMount - data is already loaded from store
+	// Real-time updates are handled by the centralized store
 
 	// Handle date range change
-	async function changeDateRange(range: string) {
+	function changeDateRange(range: string) {
 		dateRange = range;
 		showDatePicker = false;
-		
-		// Reload data with new filter
-		try {
-			const orderItems = await pb.collection('order_items').getList(1, 500, { expand: 'product' });
-			const products = await pb.collection('products').getList(1, 500);
-			const customers = await pb.collection('customers').getList(1, 500);
-			const orders = await pb.collection('orders').getList(1, 500);
-			updateAllMetrics(orderItems.items, products.items, customers.items, orders.items);
-		} catch (error) {
-			console.error('Error updating date range:', error);
-		}
+		// Metrics will update automatically via reactive store subscriptions
+		updateAllMetrics(currentOrderItems, currentProducts, currentCustomers, currentOrders);
 	}
 
 </script>
@@ -553,6 +555,8 @@
 					<p class="text-gray-400 text-xs mt-1">
 						{#if dateRange === 'today'}
 							Today • Real-time business performance and insights
+						{:else if dateRange === 'lastWeek'}
+							Last 7 days • Real-time business performance and insights
 						{:else if dateRange === 'last30'}
 							Last 30 days • Real-time business performance and insights
 						{:else if dateRange === 'all'}
@@ -566,9 +570,9 @@
 					<div class="relative">
 						<button 
 							on:click={() => showDatePicker = !showDatePicker}
-							class="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 {dateRange === 'today' || dateRange === 'last30' ? 'bg-blue-50 border-blue-300' : ''}"
+							class="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 {dateRange === 'today' || dateRange === 'lastWeek' || dateRange === 'last30' ? 'bg-blue-50 border-blue-300' : ''}"
 						>
-							📅 {dateRange === 'today' ? 'Today' : dateRange === 'last30' ? 'Last 30 Days' : dateRange === 'all' ? 'All Time' : 'Custom'}
+							📅 {dateRange === 'today' ? 'Today' : dateRange === 'lastWeek' ? 'Last Week' : dateRange === 'last30' ? 'Last 30 Days' : dateRange === 'all' ? 'All Time' : 'Custom'}
 						</button>
 						{#if showDatePicker}
 							<div class="absolute right-0 mt-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-10 w-64">
@@ -578,6 +582,12 @@
 										class="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded {dateRange === 'today' ? 'bg-blue-100 text-blue-700 font-semibold' : ''}"
 									>
 										Today
+									</button>
+									<button 
+										on:click={() => changeDateRange('lastWeek')}
+										class="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 rounded {dateRange === 'lastWeek' ? 'bg-blue-100 text-blue-700 font-semibold' : ''}"
+									>
+										Last Week (7 days)
 									</button>
 									<button 
 										on:click={() => changeDateRange('last30')}
@@ -865,7 +875,7 @@
 				<h3 class="text-sm font-semibold text-gray-900">Sales by Region</h3>
 			</div>
 				<div class="space-y-3">
-					{#each salesByRegion as region}
+					{#each salesByRegion.slice(0, 7) as region}
 						{@const maxBales = salesByRegion.length > 0 ? Math.max(...salesByRegion.map(r => r.bales), 1) : 1}
 						{@const barWidth = (region.bales / maxBales) * 100}
 						{@const showValueInside = barWidth > 20}
@@ -962,7 +972,7 @@
 						<tr class="border-b border-gray-200">
 							<th class="text-left py-2 px-2 text-gray-700 font-semibold">Date</th>
 							<th class="text-left py-2 px-2 text-gray-700 font-semibold">Customer</th>
-							<th class="text-left py-2 px-2 text-gray-700 font-semibold">Region</th>
+							<th class="text-left py-2 px-2 text-gray-700 font-semibold">Address</th>
 							<th class="text-left py-2 px-2 text-gray-700 font-semibold">Product Items</th>
 							<th class="text-left py-2 px-2 text-gray-700 font-semibold">Status</th>
 						</tr>
@@ -972,7 +982,7 @@
 							<tr class="border-b border-gray-100 hover:bg-gray-50">
 								<td class="py-2 px-2 text-gray-900">{order.date}</td>
 								<td class="py-2 px-2 text-gray-900 font-medium">{order.customer}</td>
-								<td class="py-2 px-2 text-gray-600">{order.region}</td>
+								<td class="py-2 px-2 text-gray-600">{order.address}</td>
 								<td class="py-2 px-2 text-gray-600 text-xs">{order.items}</td>
 								<td class="py-2 px-2">
 									<span class="px-2 py-0.5 rounded text-xs font-semibold {order.statusColor}">

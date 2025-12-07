@@ -10,7 +10,7 @@
 		{ name: 'Dashboard', path: '/analytics', icon: 'dashboard' },
 		{ name: 'Orders', path: '/analytics/orders', icon: 'orders' },
 		{ name: 'Customers', path: '/analytics/customers', icon: 'customers' },
-		{ name: 'Products', path: '/products', icon: 'products' },
+		{ name: 'Products', path: '/analytics/products', icon: 'products' },
 		{ name: 'JSON', path: '/analytics/json', icon: 'json' }
 	];
 </script>
@@ -123,48 +123,6 @@
 				</a>
 			{/each}
 		</nav>
-
-		<!-- Divider -->
-		<div class="border-t border-gray-200"></div>
-
-		<!-- User Section -->
-		<div class="px-3 py-6 space-y-2">
-			<!-- Profile Button -->
-			<a
-				href="/profile"
-				class="flex items-center gap-3 px-3 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
-			>
-				<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-					/>
-				</svg>
-				{#if sidebarOpen}
-					<span class="text-sm font-medium">Profile</span>
-				{/if}
-			</a>
-
-			<!-- Logout Button -->
-			<button
-				on:click={() => alert('Logout clicked')}
-				class="w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-colors text-red-600 hover:bg-red-50"
-			>
-				<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-					/>
-				</svg>
-				{#if sidebarOpen}
-					<span class="text-sm font-medium">Logout</span>
-				{/if}
-			</button>
-		</div>
 	</aside>
 
 	<!-- Overlay for mobile when sidebar is open -->

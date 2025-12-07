@@ -51,30 +51,170 @@
 			const records = parseAndValidateJSON(jsonInputs[activeTab]);
 			const table = tables.find(t => t.id === activeTab);
 
+			let successCount = 0;
+			let errorCount = 0;
+			const errors: string[] = [];
+
 			for (const record of records) {
 				const typedRecord = record as Record<string, unknown>;
-				// Remove system fields if they exist
-				const { collectionId, collectionName, created, updated, ...data } = typedRecord;
-
-				try {
-					// Try to update if ID exists
-					if (typedRecord.id) {
-						await pb.collection(activeTab).update(typedRecord.id as string, data);
-					} else {
-						// Create new record
-						await pb.collection(activeTab).create(data);
+				
+				// Check if this is a combined order format (has "items" array)
+				const hasItems = Array.isArray(typedRecord.items) && typedRecord.items.length > 0;
+				const isOrdersTab = activeTab === 'orders';
+				
+				if (hasItems && isOrdersTab) {
+					// Handle combined format: order + items
+					try {
+						// Extract order data (remove items, customer_name, product_name, product_size)
+						const { items, customer_name, product_name, product_size, collectionId, collectionName, created, updated, id, ...orderData } = typedRecord;
+						
+						// Create the order first
+						let orderId: string;
+						if (typedRecord.id) {
+							// Update existing order
+							await pb.collection('orders').update(typedRecord.id as string, orderData);
+							orderId = typedRecord.id as string;
+						} else {
+							// Create new order
+							const newOrder = await pb.collection('orders').create(orderData);
+							orderId = newOrder.id;
+						}
+						
+						// Create order items
+						const orderItems = items as Array<Record<string, unknown>>;
+						let itemsSuccess = 0;
+						let itemsError = 0;
+						
+						for (const item of orderItems) {
+							try {
+								const { product_name, product_size, ...itemData } = item;
+								// Add the order ID to the item
+								const orderItemData = {
+									...itemData,
+									order: orderId
+								};
+								
+								await pb.collection('order_items').create(orderItemData);
+								itemsSuccess++;
+							} catch (itemError) {
+								itemsError++;
+								const itemName = (item.product_name || item.product || 'item') as string;
+								console.error(`Error creating order item "${itemName}":`, itemError);
+							}
+						}
+						
+						if (itemsError === 0) {
+							successCount++;
+						} else {
+							errorCount++;
+							const recordName = typedRecord.customer_name || typedRecord.customer || `Order ${successCount + errorCount}`;
+							errors.push(`${recordName}: Order created but ${itemsError} item(s) failed`);
+						}
+					} catch (error) {
+						errorCount++;
+						const recordName = typedRecord.customer_name || typedRecord.customer || `Record ${successCount + errorCount}`;
+						
+						// Extract detailed error information from PocketBase
+						let errorMessage = 'Unknown error';
+						
+						if (error?.response) {
+							const response = error.response;
+							if (response.data) {
+								const fieldErrors: string[] = [];
+								for (const [field, message] of Object.entries(response.data)) {
+									if (Array.isArray(message)) {
+										fieldErrors.push(`${field}: ${message.join(', ')}`);
+									} else if (typeof message === 'string') {
+										fieldErrors.push(`${field}: ${message}`);
+									} else {
+										fieldErrors.push(`${field}: ${JSON.stringify(message)}`);
+									}
+								}
+								if (fieldErrors.length > 0) {
+									errorMessage = fieldErrors.join('; ');
+								} else {
+									errorMessage = response.message || error.message || 'Validation failed';
+								}
+							} else {
+								errorMessage = response.message || error.message || 'Failed to create record';
+							}
+						} else if (error?.message) {
+							errorMessage = error.message;
+						}
+						
+						errors.push(`${recordName}: ${errorMessage}`);
+						console.error(`Error processing combined order "${recordName}":`, error);
 					}
-				} catch (error) {
-					console.error(`Error processing record:`, error);
-					throw error;
+				} else {
+					// Handle regular format (single record)
+					// Remove system fields if they exist
+					const { collectionId, collectionName, created, updated, id, customer_name, product_name, product_size, items, ...data } = typedRecord;
+
+					try {
+						// Try to update if ID exists
+						if (typedRecord.id) {
+							await pb.collection(activeTab).update(typedRecord.id as string, data);
+							successCount++;
+						} else {
+							// Create new record
+							await pb.collection(activeTab).create(data);
+							successCount++;
+						}
+					} catch (error) {
+						errorCount++;
+						const recordName = typedRecord.name || typedRecord.id || `Record ${successCount + errorCount}`;
+						
+						// Extract detailed error information from PocketBase
+						let errorMessage = 'Unknown error';
+						
+						if (error?.response) {
+							// PocketBase error structure
+							const response = error.response;
+							
+							// Check for field-specific validation errors
+							if (response.data) {
+								const fieldErrors: string[] = [];
+								for (const [field, message] of Object.entries(response.data)) {
+									if (Array.isArray(message)) {
+										fieldErrors.push(`${field}: ${message.join(', ')}`);
+									} else if (typeof message === 'string') {
+										fieldErrors.push(`${field}: ${message}`);
+									} else {
+										fieldErrors.push(`${field}: ${JSON.stringify(message)}`);
+									}
+								}
+								if (fieldErrors.length > 0) {
+									errorMessage = fieldErrors.join('; ');
+								} else {
+									errorMessage = response.message || error.message || 'Validation failed';
+								}
+							} else {
+								errorMessage = response.message || error.message || 'Failed to create record';
+							}
+						} else if (error?.message) {
+							errorMessage = error.message;
+						}
+						
+						errors.push(`${recordName}: ${errorMessage}`);
+						console.error(`Error processing record "${recordName}":`, error);
+						console.error('Full error object:', JSON.stringify(error, null, 2));
+						// Continue processing other records instead of stopping
+					}
 				}
 			}
 
-			showMessage(`Successfully uploaded ${records.length} record(s) to ${table?.name}`, 'success');
-			jsonInputs[activeTab] = '';
+			if (errorCount > 0) {
+				const errorMsg = `Failed to create ${errorCount} record(s). ${successCount > 0 ? `Successfully created ${successCount} record(s). ` : ''}Errors: ${errors.join('; ')}`;
+				showMessage(errorMsg, 'error');
+			} else {
+				showMessage(`Successfully uploaded ${records.length} record(s) to ${table?.name}`, 'success');
+				jsonInputs[activeTab] = '';
+			}
+
 		} catch (error) {
 			const err = error as Error;
-			showMessage(`Error: ${err.message}`, 'error');
+			const errorMessage = error?.response?.message || error?.message || err.message || 'Unknown error occurred';
+			showMessage(`Error: ${errorMessage}`, 'error');
 		} finally {
 			loading = false;
 		}
@@ -92,6 +232,256 @@
 		} catch (error) {
 			const err = error as Error;
 			showMessage(`Error exporting: ${err.message}`, 'error');
+		} finally {
+			loading = false;
+		}
+	};
+
+	// Helper function to get customer ID by name (for orders tab)
+	const lookupCustomerId = async (customerName: string): Promise<string | null> => {
+		try {
+			const customers = await pb.collection('customers').getList(1, 1, {
+				filter: `name = "${customerName}"`
+			});
+			return customers.items.length > 0 ? customers.items[0].id : null;
+		} catch (error) {
+			console.error('Error looking up customer:', error);
+			return null;
+		}
+	};
+
+	// Helper function to get product ID by name and size
+	const lookupProductId = async (productName: string, productSize: string = ''): Promise<string | null> => {
+		try {
+			let filter = `name = "${productName}"`;
+			if (productSize) {
+				filter += ` && size = "${productSize}"`;
+			} else {
+				filter += ` && (size = "" || size = null)`;
+			}
+			const products = await pb.collection('products').getList(1, 1, {
+				filter: filter
+			});
+			return products.items.length > 0 ? products.items[0].id : null;
+		} catch (error) {
+			console.error('Error looking up product:', error);
+			return null;
+		}
+	};
+
+	// Enhanced upload that can auto-lookup IDs by name
+	const uploadJSONWithLookup = async (): Promise<void> => {
+		if (!jsonInputs[activeTab].trim()) {
+			showMessage('Please enter JSON data', 'error');
+			return;
+		}
+
+		loading = true;
+		try {
+			const records = parseAndValidateJSON(jsonInputs[activeTab]);
+			const table = tables.find(t => t.id === activeTab);
+
+			let successCount = 0;
+			let errorCount = 0;
+			const errors: string[] = [];
+
+			// If orders tab and has customer_name, try to lookup IDs
+			if (activeTab === 'orders') {
+				for (const record of records) {
+					const typedRecord = record as Record<string, unknown>;
+					
+					// If customer_name exists but customer is a placeholder, try to lookup
+					if (typedRecord.customer_name && 
+						(!typedRecord.customer || (typedRecord.customer as string).startsWith('customer_id_'))) {
+						const customerName = typedRecord.customer_name as string;
+						const customerId = await lookupCustomerId(customerName);
+						if (customerId) {
+							typedRecord.customer = customerId;
+							console.log(`Found customer ID for "${customerName}": ${customerId}`);
+						} else {
+							errorCount++;
+							errors.push(`${customerName}: Customer not found in database`);
+							continue;
+						}
+					}
+
+					// If items exist, try to lookup product IDs
+					if (Array.isArray(typedRecord.items)) {
+						for (const item of typedRecord.items as Array<Record<string, unknown>>) {
+							if (item.product_name && 
+								(!item.product || (item.product as string).startsWith('product_id_'))) {
+								const productName = item.product_name as string;
+								const productSize = (item.product_size as string) || '';
+								const productId = await lookupProductId(productName, productSize);
+								if (productId) {
+									item.product = productId;
+									console.log(`Found product ID for "${productName}" ${productSize}: ${productId}`);
+								} else {
+									console.warn(`Product not found: "${productName}" size: "${productSize}"`);
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Now proceed with normal upload
+			for (const record of records) {
+				const typedRecord = record as Record<string, unknown>;
+				
+				// Check if this is a combined order format (has "items" array)
+				const hasItems = Array.isArray(typedRecord.items) && typedRecord.items.length > 0;
+				const isOrdersTab = activeTab === 'orders';
+				
+				if (hasItems && isOrdersTab) {
+					// Handle combined format: order + items
+					try {
+						// Extract order data (remove items, customer_name, product_name, product_size)
+						const { items, customer_name, product_name, product_size, collectionId, collectionName, created, updated, id, ...orderData } = typedRecord;
+						
+						// Create the order first
+						let orderId: string;
+						if (typedRecord.id) {
+							// Update existing order
+							await pb.collection('orders').update(typedRecord.id as string, orderData);
+							orderId = typedRecord.id as string;
+						} else {
+							// Create new order
+							const newOrder = await pb.collection('orders').create(orderData);
+							orderId = newOrder.id;
+						}
+						
+						// Create order items
+						const orderItems = items as Array<Record<string, unknown>>;
+						let itemsSuccess = 0;
+						let itemsError = 0;
+						
+						for (const item of orderItems) {
+							try {
+								const { product_name, product_size, ...itemData } = item;
+								// Add the order ID to the item
+								const orderItemData = {
+									...itemData,
+									order: orderId
+								};
+								
+								await pb.collection('order_items').create(orderItemData);
+								itemsSuccess++;
+							} catch (itemError) {
+								itemsError++;
+								const itemName = (item.product_name || item.product || 'item') as string;
+								console.error(`Error creating order item "${itemName}":`, itemError);
+							}
+						}
+						
+						if (itemsError === 0) {
+							successCount++;
+						} else {
+							errorCount++;
+							const recordName = typedRecord.customer_name || typedRecord.customer || `Order ${successCount + errorCount}`;
+							errors.push(`${recordName}: Order created but ${itemsError} item(s) failed`);
+						}
+					} catch (error) {
+						errorCount++;
+						const recordName = typedRecord.customer_name || typedRecord.customer || `Record ${successCount + errorCount}`;
+						
+						// Extract detailed error information from PocketBase
+						let errorMessage = 'Unknown error';
+						
+						if (error?.response) {
+							const response = error.response;
+							if (response.data) {
+								const fieldErrors: string[] = [];
+								for (const [field, message] of Object.entries(response.data)) {
+									if (Array.isArray(message)) {
+										fieldErrors.push(`${field}: ${message.join(', ')}`);
+									} else if (typeof message === 'string') {
+										fieldErrors.push(`${field}: ${message}`);
+									} else {
+										fieldErrors.push(`${field}: ${JSON.stringify(message)}`);
+									}
+								}
+								if (fieldErrors.length > 0) {
+									errorMessage = fieldErrors.join('; ');
+								} else {
+									errorMessage = response.message || error.message || 'Validation failed';
+								}
+							} else {
+								errorMessage = response.message || error.message || 'Failed to create record';
+							}
+						} else if (error?.message) {
+							errorMessage = error.message;
+						}
+						
+						errors.push(`${recordName}: ${errorMessage}`);
+						console.error(`Error processing combined order "${recordName}":`, error);
+					}
+				} else {
+					// Handle regular format (single record)
+					// Remove system fields if they exist
+					const { collectionId, collectionName, created, updated, id, customer_name, product_name, product_size, items, ...data } = typedRecord;
+
+					try {
+						// Try to update if ID exists
+						if (typedRecord.id) {
+							await pb.collection(activeTab).update(typedRecord.id as string, data);
+							successCount++;
+						} else {
+							// Create new record
+							await pb.collection(activeTab).create(data);
+							successCount++;
+						}
+					} catch (error) {
+						errorCount++;
+						const recordName = typedRecord.name || typedRecord.customer_name || typedRecord.id || `Record ${successCount + errorCount}`;
+						
+						// Extract detailed error information from PocketBase
+						let errorMessage = 'Unknown error';
+						
+						if (error?.response) {
+							const response = error.response;
+							if (response.data) {
+								const fieldErrors: string[] = [];
+								for (const [field, message] of Object.entries(response.data)) {
+									if (Array.isArray(message)) {
+										fieldErrors.push(`${field}: ${message.join(', ')}`);
+									} else if (typeof message === 'string') {
+										fieldErrors.push(`${field}: ${message}`);
+									} else {
+										fieldErrors.push(`${field}: ${JSON.stringify(message)}`);
+									}
+								}
+								if (fieldErrors.length > 0) {
+									errorMessage = fieldErrors.join('; ');
+								} else {
+									errorMessage = response.message || error.message || 'Validation failed';
+								}
+							} else {
+								errorMessage = response.message || error.message || 'Failed to create record';
+							}
+						} else if (error?.message) {
+							errorMessage = error.message;
+						}
+						
+						errors.push(`${recordName}: ${errorMessage}`);
+						console.error(`Error processing record "${recordName}":`, error);
+						console.error('Full error object:', JSON.stringify(error, null, 2));
+					}
+				}
+			}
+
+			if (errorCount > 0) {
+				const errorMsg = `Failed to create ${errorCount} record(s). ${successCount > 0 ? `Successfully created ${successCount} record(s). ` : ''}Errors: ${errors.join('; ')}`;
+				showMessage(errorMsg, 'error');
+			} else {
+				showMessage(`Successfully uploaded ${records.length} record(s) to ${table?.name}`, 'success');
+				jsonInputs[activeTab] = '';
+			}
+
+		} catch (error) {
+			const err = error as Error;
+			const errorMessage = error?.response?.message || error?.message || err.message || 'Unknown error occurred';
+			showMessage(`Error: ${errorMessage}`, 'error');
 		} finally {
 			loading = false;
 		}
@@ -170,7 +560,7 @@
 
 					<div class="mt-3 flex gap-2 flex-wrap">
 						<button
-							on:click={uploadJSON}
+							on:click={activeTab === 'orders' ? uploadJSONWithLookup : uploadJSON}
 							disabled={loading}
 							class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
 						>
@@ -231,6 +621,10 @@
 						<li>Click "Upload to DB" to save records</li>
 						<li>Click "Export Table" to download all records</li>
 						<li>System fields (id, collectionId, etc) are ignored on upload</li>
+						{#if activeTab === 'orders'}
+							<li class="mt-2 font-semibold">💡 Tip: Use combined format with "items" array to upload orders and items together!</li>
+							<li class="mt-1 text-blue-700">💡 Auto-lookup: If you use "customer_name" instead of "customer" ID, the system will try to find the customer automatically!</li>
+						{/if}
 					</ol>
 				</div>
 

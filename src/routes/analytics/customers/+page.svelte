@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import pb from '$lib/pocketbase';
+	import { customers, orders, orderItems } from '$lib/stores/dataStore';
 
 	interface MonthlyData {
 		month: string;
@@ -21,21 +22,35 @@
 		monthlyData: MonthlyData[];
 	}
 
-	// State
-	let customers: any[] = [];
+	// State - using stores for data
+	let localCustomers: any[] = [];
 	let filteredCustomers: any[] = [];
 	let loading = false;
 	let searchQuery = '';
 	let sortBy = 'created'; // 'created', 'name', 'phone'
 	let sortOrder = 'desc'; // 'asc', 'desc'
+	let showDuplicatesOnly = false; // Filter for duplicates
+	let duplicateGroups: Map<string, any[]> = new Map(); // Groups of duplicates
+	let customerDuplicateInfo: Map<string, any> = new Map(); // Info about each customer's duplicates
+	
+	// Subscribe to stores (after variable declarations)
+	customers.subscribe(value => {
+		localCustomers = value;
+		// Reactive statement below will handle filtering
+	});
 
 	// Modal States
 	let showCreateModal = false;
 	let showEditModal = false;
 	let showDeleteConfirm = false;
 	let showDetailCard = false;
+	let showDuplicateManager = false;
+	let showMergeModal = false;
 	let selectedCustomer: any = null;
 	let customerOrdersData: CustomerOrdersData | null = null;
+	let potentialDuplicates: any[] = []; // For creating/editing warnings
+	let mergeSource: any = null; // For merging customers
+	let mergeTarget: any = null;
 
 	// Form Data
 	let formData = {
@@ -50,23 +65,146 @@
 	// Customer types
 	const customerTypes = ['General Trade', 'Retail', 'Wholesale', 'Corporate', 'Individual'];
 
-	// Load customers and subscribe to real-time changes
-	async function loadCustomers() {
-		loading = true;
-		try {
-			const customersData = await pb.collection('customers').getList(1, 500, {
-				sort: '-created'
-			});
-			customers = customersData.items;
-			filterAndSortCustomers();
+	// Normalize string for comparison (remove extra spaces, convert to lowercase)
+	function normalizeString(str: string): string {
+		if (!str) return '';
+		return str.trim().toLowerCase().replace(/\s+/g, ' ');
+	}
 
-			// Subscribe to real-time changes
-			subscribeToCustomers();
-		} catch (error) {
-			console.error('Error loading customers:', error);
-		} finally {
-			loading = false;
+	// Calculate similarity between two strings (Levenshtein-like, simplified)
+	function calculateSimilarity(str1: string, str2: string): number {
+		const s1 = normalizeString(str1);
+		const s2 = normalizeString(str2);
+		if (s1 === s2) return 1;
+		if (!s1 || !s2) return 0;
+		
+		// Check if one contains the other
+		if (s1.includes(s2) || s2.includes(s1)) return 0.8;
+		
+		// Simple character overlap check
+		const longer = s1.length > s2.length ? s1 : s2;
+		const shorter = s1.length > s2.length ? s2 : s1;
+		const matches = shorter.split('').filter(char => longer.includes(char)).length;
+		return matches / longer.length;
+	}
+
+	// Check if two customers are duplicates
+	function areDuplicates(customer1: any, customer2: any): boolean {
+		// Exact name match
+		if (normalizeString(customer1.name) === normalizeString(customer2.name)) {
+			return true;
 		}
+		
+		// Same phone number (if both have phone)
+		if (customer1.phone && customer2.phone && customer1.phone === customer2.phone) {
+			return true;
+		}
+		
+		// Similar name (85% similarity threshold)
+		const nameSimilarity = calculateSimilarity(customer1.name, customer2.name);
+		if (nameSimilarity >= 0.85) {
+			return true;
+		}
+		
+		// Same name + same region
+		if (normalizeString(customer1.name) === normalizeString(customer2.name) &&
+			customer1.region && customer2.region &&
+			normalizeString(customer1.region) === normalizeString(customer2.region)) {
+			return true;
+		}
+		
+		return false;
+	}
+
+	// Detect all duplicate groups
+	function detectDuplicates() {
+		const groups = new Map<string, any[]>();
+		const info = new Map<string, any>();
+		
+		// Group customers by potential duplicate keys
+		for (let i = 0; i < localCustomers.length; i++) {
+			const customer = localCustomers[i];
+			const key = normalizeString(customer.name || '') + '|' + (customer.phone || '');
+			
+			if (!groups.has(key)) {
+				groups.set(key, []);
+			}
+			groups.get(key)!.push(customer);
+		}
+		
+		// Also check for similar names
+		const processed = new Set<string>();
+		for (let i = 0; i < localCustomers.length; i++) {
+			if (processed.has(localCustomers[i].id)) continue;
+			
+			const customer = localCustomers[i];
+			const duplicates: any[] = [customer];
+			
+			for (let j = i + 1; j < localCustomers.length; j++) {
+				if (processed.has(localCustomers[j].id)) continue;
+				
+				if (areDuplicates(customer, localCustomers[j])) {
+					duplicates.push(localCustomers[j]);
+					processed.add(localCustomers[j].id);
+				}
+			}
+			
+			if (duplicates.length > 1) {
+				const groupKey = duplicates.map(c => c.id).sort().join('_');
+				groups.set(groupKey, duplicates);
+				
+				// Mark all in group as duplicates
+				duplicates.forEach(c => {
+					info.set(c.id, {
+						isDuplicate: true,
+						groupKey: groupKey,
+						duplicateCount: duplicates.length,
+						duplicates: duplicates.filter(d => d.id !== c.id)
+					});
+				});
+			}
+			
+			processed.add(customer.id);
+		}
+		
+		duplicateGroups = groups;
+		customerDuplicateInfo = info;
+	}
+
+	// Check for potential duplicates when creating/editing
+	function checkPotentialDuplicates(customerData: any, excludeId?: string): any[] {
+		return localCustomers
+			.filter(c => !excludeId || c.id !== excludeId)
+			.filter(c => {
+				// Check exact name match
+				if (normalizeString(c.name) === normalizeString(customerData.name)) {
+					return true;
+				}
+				
+				// Check same phone
+				if (customerData.phone && c.phone && 
+					customerData.phone.toString() === c.phone.toString()) {
+					return true;
+				}
+				
+				// Check similar name
+				const similarity = calculateSimilarity(c.name, customerData.name);
+				if (similarity >= 0.85) {
+					return true;
+				}
+				
+				return false;
+			});
+	}
+
+	// Load customers - data is already loaded from store
+	function loadCustomers() {
+		loading = true;
+		// Detect duplicates
+		detectDuplicates();
+		// Data is already loaded from store, just filter and sort
+		filterAndSortCustomers();
+		loading = false;
 	}
 
 	// View customer details and insights
@@ -74,26 +212,29 @@
 		try {
 			selectedCustomer = customer;
 			
-			// Load customer's orders
-			const ordersData = await pb.collection('orders').getList(1, 500, {
-				filter: `customer = "${customer.id}"`,
-				sort: '-created'
+			// Get customer's orders from store (using get method)
+			let allOrders: any[] = [];
+			const unsubscribeOrders = orders.subscribe(value => {
+				allOrders = value;
 			});
+			unsubscribeOrders();
 			
-			const orders = ordersData.items;
+			const customerOrders = allOrders
+				.filter(o => o.customer === customer.id)
+				.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 			
-			// Load order items for this customer
+			// Get order items for this customer from store
+			let allOrderItems: any[] = [];
+			const unsubscribeOrderItems = orderItems.subscribe(value => {
+				allOrderItems = value;
+			});
+			unsubscribeOrderItems();
+			
+			const localOrderItems = allOrderItems.filter(oi => customerOrders.some(o => o.id === oi.order));
+			
 			let totalSpent = 0;
-			let orderQuantities: any[] = [];
-			
-			for (const order of orders) {
-				const items = await pb.collection('order_items').getList(1, 500, {
-					filter: `order = "${order.id}"`
-				});
-				
-				for (const item of items.items) {
-					totalSpent += item.quantity || 0;
-				}
+			for (const item of localOrderItems) {
+				totalSpent += item.quantity || 0;
 			}
 			
 			// Calculate orders per month for last 6 months
@@ -108,7 +249,7 @@
 			}
 			
 			// Count orders by month
-			orders.forEach(order => {
+			customerOrders.forEach(order => {
 				const orderDate = new Date(order.created);
 				if (orderDate >= sixMonthsAgo) {
 					const key = orderDate.toLocaleString('default', { month: 'short' });
@@ -117,8 +258,8 @@
 			});
 			
 			customerOrdersData = {
-				orders: orders.slice(0, 10),
-				totalOrders: orders.length,
+				orders: customerOrders.slice(0, 10),
+				totalOrders: customerOrders.length,
 				totalSpent: totalSpent,
 				monthlyData: Array.from(monthlyOrders.entries()).map(([month, count]) => ({ month, count }))
 			};
@@ -135,29 +276,19 @@
 		customerOrdersData = null;
 	}
 
-	// Subscribe to real-time updates
-	function subscribeToCustomers() {
-		// Subscribe to create events
-		pb.collection('customers').subscribe('*', (e) => {
-			if (e.action === 'create') {
-				customers = [e.record, ...customers];
-				filterAndSortCustomers();
-			} else if (e.action === 'update') {
-				customers = customers.map(c => c.id === e.record.id ? e.record : c);
-				if (selectedCustomer?.id === e.record.id) {
-					selectedCustomer = e.record;
-				}
-				filterAndSortCustomers();
-			} else if (e.action === 'delete') {
-				customers = customers.filter(c => c.id !== e.record.id);
-				filterAndSortCustomers();
-			}
-		}, { expand: '' });
-	}
+	// Real-time updates are handled by the centralized store
 
 	// Filter and sort customers
 	function filterAndSortCustomers() {
-		let result = [...customers];
+		let result = [...localCustomers];
+
+		// Duplicate filter
+		if (showDuplicatesOnly) {
+			result = result.filter(c => {
+				const info = customerDuplicateInfo.get(c.id);
+				return info && info.isDuplicate;
+			});
+		}
 
 		// Search filter
 		if (searchQuery) {
@@ -204,6 +335,19 @@
 			return;
 		}
 
+		// Check for duplicates before creating
+		const duplicates = checkPotentialDuplicates({
+			name: formData.name,
+			phone: formData.phone ? parseInt(formData.phone) : null
+		});
+		
+		if (duplicates.length > 0) {
+			const confirmMsg = `Warning: ${duplicates.length} potential duplicate(s) found:\n\n${duplicates.map(d => `- ${d.name}${d.phone ? ' (Phone: ' + d.phone + ')' : ''}`).join('\n')}\n\nDo you still want to create this customer?`;
+			if (!confirm(confirmMsg)) {
+				return;
+			}
+		}
+
 		try {
 			loading = true;
 			const newCustomer = await pb.collection('customers').create({
@@ -230,6 +374,19 @@
 		if (!formData.name) {
 			alert('Name is required');
 			return;
+		}
+
+		// Check for duplicates before updating (excluding current customer)
+		const duplicates = checkPotentialDuplicates({
+			name: formData.name,
+			phone: formData.phone ? parseInt(formData.phone) : null
+		}, selectedCustomer.id);
+		
+		if (duplicates.length > 0) {
+			const confirmMsg = `Warning: ${duplicates.length} potential duplicate(s) found:\n\n${duplicates.map(d => `- ${d.name}${d.phone ? ' (Phone: ' + d.phone + ')' : ''}`).join('\n')}\n\nDo you still want to update this customer?`;
+			if (!confirm(confirmMsg)) {
+				return;
+			}
 		}
 
 		try {
@@ -279,11 +436,25 @@
 			phone: '',
 			customer_type: 'General Trade'
 		};
+		potentialDuplicates = [];
 		showCreateModal = true;
 	}
 
 	function closeCreateModal() {
 		showCreateModal = false;
+		potentialDuplicates = [];
+	}
+
+	// Check for duplicates while typing in create modal
+	function checkDuplicatesOnInput() {
+		if (!formData.name) {
+			potentialDuplicates = [];
+			return;
+		}
+		potentialDuplicates = checkPotentialDuplicates({
+			name: formData.name,
+			phone: formData.phone ? parseInt(formData.phone) : null
+		});
 	}
 
 	function openEditModal(customer: any) {
@@ -296,12 +467,29 @@
 			phone: customer.phone ? customer.phone.toString() : '',
 			customer_type: customer.customer_type || 'General Trade'
 		};
+		potentialDuplicates = checkPotentialDuplicates({
+			name: customer.name,
+			phone: customer.phone
+		}, customer.id);
 		showEditModal = true;
 	}
 
 	function closeEditModal() {
 		showEditModal = false;
 		selectedCustomer = null;
+		potentialDuplicates = [];
+	}
+
+	// Check for duplicates while typing in edit modal
+	function checkDuplicatesOnEditInput() {
+		if (!formData.name) {
+			potentialDuplicates = [];
+			return;
+		}
+		potentialDuplicates = checkPotentialDuplicates({
+			name: formData.name,
+			phone: formData.phone ? parseInt(formData.phone) : null
+		}, selectedCustomer?.id);
 	}
 
 	function openDeleteConfirm(customer: any) {
@@ -314,17 +502,139 @@
 		selectedCustomer = null;
 	}
 
+	function openDuplicateManager() {
+		detectDuplicates();
+		showDuplicateManager = true;
+	}
+
+	function closeDuplicateManager() {
+		showDuplicateManager = false;
+	}
+
+	function openMergeModal(source: any, target: any) {
+		mergeSource = source;
+		mergeTarget = target;
+		showMergeModal = true;
+	}
+
+	function closeMergeModal() {
+		mergeSource = null;
+		mergeTarget = null;
+		showMergeModal = false;
+	}
+
+	// Merge two customers (transfer orders from source to target, then delete source)
+	async function mergeCustomers() {
+		if (!mergeSource || !mergeTarget) return;
+		
+		try {
+			loading = true;
+			
+			// Get all orders for the source customer
+			let allOrders: any[] = [];
+			const unsubscribeOrders = orders.subscribe(value => {
+				allOrders = value;
+			});
+			unsubscribeOrders();
+			
+			const sourceOrders = allOrders.filter(o => o.customer === mergeSource.id);
+			
+			// Update all orders to point to target customer
+			for (const order of sourceOrders) {
+				await pb.collection('orders').update(order.id, {
+					customer: mergeTarget.id
+				});
+			}
+			
+			// Merge customer data (prefer target, but fill in missing data from source)
+			const mergedData: any = { ...mergeTarget };
+			if (!mergedData.region && mergeSource.region) mergedData.region = mergeSource.region;
+			if (!mergedData.address && mergeSource.address) mergedData.address = mergeSource.address;
+			if (!mergedData.contact_person && mergeSource.contact_person) mergedData.contact_person = mergeSource.contact_person;
+			if (!mergedData.phone && mergeSource.phone) mergedData.phone = mergeSource.phone;
+			
+			// Update target with merged data
+			await pb.collection('customers').update(mergeTarget.id, mergedData);
+			
+			// Delete source customer
+			await pb.collection('customers').delete(mergeSource.id);
+			
+			closeMergeModal();
+			detectDuplicates(); // Refresh duplicate detection
+		} catch (error) {
+			console.error('Error merging customers:', error);
+			alert('Failed to merge customers. Please check console for details.');
+		} finally {
+			loading = false;
+		}
+	}
+
+	// Bulk delete duplicates in a group (keep the oldest one)
+	async function bulkDeleteDuplicates(duplicateGroup: any[]) {
+		if (duplicateGroup.length <= 1) return;
+		
+		// Sort by created date, keep the oldest
+		const sorted = [...duplicateGroup].sort((a, b) => 
+			new Date(a.created).getTime() - new Date(b.created).getTime()
+		);
+		const keepCustomer = sorted[0];
+		const toDelete = sorted.slice(1);
+		
+		if (!confirm(`This will delete ${toDelete.length} duplicate(s) and keep "${keepCustomer.name}" (oldest record). Continue?`)) {
+			return;
+		}
+		
+		try {
+			loading = true;
+			
+			// Transfer all orders from duplicates to the kept customer
+			let allOrders: any[] = [];
+			const unsubscribeOrders = orders.subscribe(value => {
+				allOrders = value;
+			});
+			unsubscribeOrders();
+			
+			for (const duplicate of toDelete) {
+				const duplicateOrders = allOrders.filter(o => o.customer === duplicate.id);
+				
+				for (const order of duplicateOrders) {
+					await pb.collection('orders').update(order.id, {
+						customer: keepCustomer.id
+					});
+				}
+				
+				// Delete the duplicate customer
+				await pb.collection('customers').delete(duplicate.id);
+			}
+			
+			detectDuplicates(); // Refresh duplicate detection
+		} catch (error) {
+			console.error('Error bulk deleting duplicates:', error);
+			alert('Failed to delete duplicates. Please check console for details.');
+		} finally {
+			loading = false;
+		}
+	}
+
 	onMount(() => {
 		loadCustomers();
 	});
 
-	onDestroy(() => {
-		// Unsubscribe from real-time updates when component is destroyed
-		pb.collection('customers').unsubscribe('*');
-	});
-
-	$: if (searchQuery || sortBy || sortOrder) {
+	// Reactive statement: filter when data or filters change
+	$: if (localCustomers.length >= 0) {
+		detectDuplicates();
 		filterAndSortCustomers();
+	}
+	
+	// Reactive: check duplicates when form data changes
+	$: if (showCreateModal || showEditModal) {
+		if (formData.name || formData.phone) {
+			if (showCreateModal) {
+				checkDuplicatesOnInput();
+			} else if (showEditModal) {
+				checkDuplicatesOnEditInput();
+			}
+		}
 	}
 </script>
 
@@ -336,15 +646,31 @@
 				<h1 class="text-3xl font-bold text-gray-900">Customers</h1>
 				<p class="text-gray-600 mt-1">Manage all your customers in one place</p>
 			</div>
-			<button
-				on:click={openCreateModal}
-				class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
-			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-				</svg>
-				Add Customer
-			</button>
+			<div class="flex gap-3">
+				{#if Array.from(duplicateGroups.values()).some(group => group.length > 1)}
+					<button
+						on:click={openDuplicateManager}
+						class="bg-orange-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-700 transition-colors flex items-center gap-2 relative"
+					>
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+						</svg>
+						Manage Duplicates
+						<span class="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+							{Array.from(duplicateGroups.values()).filter(group => group.length > 1).length}
+						</span>
+					</button>
+				{/if}
+				<button
+					on:click={openCreateModal}
+					class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+					</svg>
+					Add Customer
+				</button>
+			</div>
 		</div>
 
 		<!-- Search and Filter Bar -->
@@ -359,6 +685,18 @@
 					/>
 				</div>
 				<div class="flex gap-2">
+					{#if Array.from(duplicateGroups.values()).some(group => group.length > 1)}
+						<button
+							on:click={() => showDuplicatesOnly = !showDuplicatesOnly}
+							class="px-4 py-2 border rounded-lg transition-colors flex items-center gap-2 {showDuplicatesOnly ? 'bg-orange-100 border-orange-500 text-orange-700' : 'border-gray-300 hover:bg-gray-50'}"
+							title="Filter duplicates only"
+						>
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+							</svg>
+							Duplicates Only
+						</button>
+					{/if}
 					<select
 						bind:value={sortBy}
 						class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -422,8 +760,18 @@
 						</thead>
 						<tbody class="divide-y divide-gray-200">
 							{#each filteredCustomers as customer (customer.id)}
-								<tr class="hover:bg-gray-50 transition-colors cursor-pointer" on:click={() => viewCustomerDetails(customer)}>
-									<td class="px-6 py-4 text-sm text-gray-900 font-medium">{customer.name}</td>
+								{@const duplicateInfo = customerDuplicateInfo.get(customer.id)}
+								<tr class="hover:bg-gray-50 transition-colors cursor-pointer {duplicateInfo?.isDuplicate ? 'bg-orange-50 hover:bg-orange-100' : ''}" on:click={() => viewCustomerDetails(customer)}>
+									<td class="px-6 py-4 text-sm text-gray-900 font-medium">
+										<div class="flex items-center gap-2">
+											{customer.name}
+											{#if duplicateInfo?.isDuplicate}
+												<span class="px-2 py-0.5 bg-orange-200 text-orange-800 rounded-full text-xs font-semibold" title="Duplicate - {duplicateInfo.duplicateCount} similar records found">
+													{duplicateInfo.duplicateCount}x
+												</span>
+											{/if}
+										</div>
+									</td>
 									<td class="px-6 py-4 text-sm text-gray-600">{customer.region || '-'}</td>
 									<td class="px-6 py-4 text-sm text-gray-600">{customer.contact_person || '-'}</td>
 									<td class="px-6 py-4 text-sm text-gray-600">{customer.phone || '-'}</td>
@@ -446,6 +794,15 @@
 											>
 												Delete
 											</button>
+											{#if duplicateInfo?.isDuplicate && duplicateInfo.duplicates?.length > 0}
+												<button
+													on:click={() => openDuplicateManager()}
+													class="text-orange-600 hover:text-orange-900 font-medium transition-colors"
+													title="View duplicates"
+												>
+													View Dups
+												</button>
+											{/if}
 										</div>
 									</td>
 								</tr>
@@ -473,11 +830,33 @@
 					</button>
 				</div>
 				<form on:submit|preventDefault={createCustomer} class="p-6 space-y-4">
+					{#if potentialDuplicates.length > 0}
+						<div class="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-4">
+							<div class="flex items-start gap-3">
+								<svg class="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+								</svg>
+								<div class="flex-1">
+									<h4 class="text-sm font-semibold text-orange-900 mb-1">Potential Duplicates Found</h4>
+									<p class="text-sm text-orange-700 mb-2">The following {potentialDuplicates.length} similar customer(s) already exist:</p>
+									<ul class="list-disc list-inside text-sm text-orange-700 space-y-1">
+										{#each potentialDuplicates.slice(0, 3) as dup}
+											<li>{dup.name}{dup.phone ? ' (Phone: ' + dup.phone + ')' : ''}</li>
+										{/each}
+										{#if potentialDuplicates.length > 3}
+											<li class="text-orange-600">... and {potentialDuplicates.length - 3} more</li>
+										{/if}
+									</ul>
+								</div>
+							</div>
+						</div>
+					{/if}
 					<div>
 						<label class="block text-sm font-medium text-gray-900 mb-1">Name *</label>
 						<input
 							type="text"
 							bind:value={formData.name}
+							on:input={checkDuplicatesOnInput}
 							placeholder="Enter customer name"
 							required
 							class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -567,11 +946,33 @@
 					</button>
 				</div>
 				<form on:submit|preventDefault={updateCustomer} class="p-6 space-y-4">
+					{#if potentialDuplicates.length > 0}
+						<div class="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-4">
+							<div class="flex items-start gap-3">
+								<svg class="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+								</svg>
+								<div class="flex-1">
+									<h4 class="text-sm font-semibold text-orange-900 mb-1">Potential Duplicates Found</h4>
+									<p class="text-sm text-orange-700 mb-2">The following {potentialDuplicates.length} similar customer(s) already exist:</p>
+									<ul class="list-disc list-inside text-sm text-orange-700 space-y-1">
+										{#each potentialDuplicates.slice(0, 3) as dup}
+											<li>{dup.name}{dup.phone ? ' (Phone: ' + dup.phone + ')' : ''}</li>
+										{/each}
+										{#if potentialDuplicates.length > 3}
+											<li class="text-orange-600">... and {potentialDuplicates.length - 3} more</li>
+										{/if}
+									</ul>
+								</div>
+							</div>
+						</div>
+					{/if}
 					<div>
 						<label class="block text-sm font-medium text-gray-900 mb-1">Name *</label>
 						<input
 							type="text"
 							bind:value={formData.name}
+							on:input={checkDuplicatesOnEditInput}
 							placeholder="Enter customer name"
 							required
 							class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -600,6 +1001,7 @@
 						<input
 							type="tel"
 							bind:value={formData.phone}
+							on:input={checkDuplicatesOnEditInput}
 							placeholder="Enter phone number"
 							class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 						/>
@@ -1025,6 +1427,156 @@
 							<p class="text-gray-600 ml-2 text-xs">Loading...</p>
 						</div>
 					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Duplicate Manager Modal -->
+	{#if showDuplicateManager}
+		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+			<div class="bg-white rounded-lg shadow-lg max-w-6xl w-full my-8 max-h-[90vh] overflow-y-auto">
+				<div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
+					<div>
+						<h2 class="text-xl font-bold text-gray-900">Duplicate Customer Manager</h2>
+						<p class="text-sm text-gray-600 mt-1">Review and resolve duplicate customers</p>
+					</div>
+					<button
+						on:click={closeDuplicateManager}
+						class="text-gray-500 hover:text-gray-700 transition-colors"
+					>
+						<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<div class="p-6">
+					{#if Array.from(duplicateGroups.values()).filter(group => group.length > 1).length === 0}
+						<div class="text-center py-12">
+							<svg class="w-16 h-16 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+							</svg>
+							<p class="text-lg font-medium text-gray-900">No Duplicates Found</p>
+							<p class="text-gray-600 mt-2">All customers are unique!</p>
+						</div>
+					{:else}
+						<div class="space-y-6">
+							{#each Array.from(duplicateGroups.values()).filter(group => group.length > 1) as duplicateGroup, groupIndex}
+								<div class="bg-orange-50 border border-orange-200 rounded-lg p-4">
+									<div class="flex items-center justify-between mb-4">
+										<div>
+											<h3 class="text-lg font-semibold text-gray-900">Duplicate Group #{groupIndex + 1}</h3>
+											<p class="text-sm text-gray-600">{duplicateGroup.length} similar record(s) found</p>
+										</div>
+										<button
+											on:click={() => bulkDeleteDuplicates(duplicateGroup)}
+											class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm font-medium"
+										>
+											Auto-Resolve (Keep Oldest)
+										</button>
+									</div>
+									<div class="space-y-3">
+										{#each duplicateGroup.sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()) as customer, idx}
+											<div class="bg-white rounded-lg border border-gray-200 p-4 flex items-start justify-between">
+												<div class="flex-1">
+													<div class="flex items-center gap-3 mb-2">
+														<h4 class="font-semibold text-gray-900">{customer.name}</h4>
+														{#if idx === 0}
+															<span class="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium">Oldest</span>
+														{/if}
+													</div>
+													<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
+														<div>
+															<span class="font-medium">Region:</span> {customer.region || '-'}
+														</div>
+														<div>
+															<span class="font-medium">Phone:</span> {customer.phone || '-'}
+														</div>
+														<div>
+															<span class="font-medium">Contact:</span> {customer.contact_person || '-'}
+														</div>
+														<div>
+															<span class="font-medium">Created:</span> {new Date(customer.created).toLocaleDateString()}
+														</div>
+													</div>
+												</div>
+												<div class="flex gap-2 ml-4">
+													{#if idx > 0}
+														<button
+															on:click={() => openMergeModal(customer, duplicateGroup[0])}
+															class="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-medium"
+														>
+															Merge into Oldest
+														</button>
+													{/if}
+													<button
+														on:click={() => openDeleteConfirm(customer)}
+														class="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm font-medium"
+													>
+														Delete
+													</button>
+												</div>
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Merge Confirmation Modal -->
+	{#if showMergeModal && mergeSource && mergeTarget}
+		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+			<div class="bg-white rounded-lg shadow-lg max-w-2xl w-full">
+				<div class="p-6">
+					<div class="flex items-center justify-center w-12 h-12 mx-auto bg-blue-100 rounded-full mb-4">
+						<svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+						</svg>
+					</div>
+					<h3 class="text-lg font-bold text-gray-900 text-center mb-4">Merge Customers</h3>
+					<p class="text-gray-600 text-center mb-6">
+						This will merge <span class="font-semibold">{mergeSource.name}</span> into <span class="font-semibold">{mergeTarget.name}</span>.
+						All orders from the source customer will be transferred to the target, and the source customer will be deleted.
+					</p>
+					<div class="bg-gray-50 rounded-lg p-4 mb-6">
+						<div class="space-y-3">
+							<div>
+								<p class="text-sm font-medium text-gray-700 mb-1">Source (will be deleted):</p>
+								<p class="text-sm text-gray-900">{mergeSource.name}</p>
+								<p class="text-xs text-gray-500">Created: {new Date(mergeSource.created).toLocaleDateString()}</p>
+							</div>
+							<div class="flex items-center justify-center">
+								<svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+								</svg>
+							</div>
+							<div>
+								<p class="text-sm font-medium text-gray-700 mb-1">Target (will be kept):</p>
+								<p class="text-sm text-gray-900">{mergeTarget.name}</p>
+								<p class="text-xs text-gray-500">Created: {new Date(mergeTarget.created).toLocaleDateString()}</p>
+							</div>
+						</div>
+					</div>
+					<div class="flex gap-3">
+						<button
+							on:click={mergeCustomers}
+							disabled={loading}
+							class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+						>
+							{loading ? 'Merging...' : 'Confirm Merge'}
+						</button>
+						<button
+							on:click={closeMergeModal}
+							class="flex-1 bg-gray-200 text-gray-900 px-4 py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+						>
+							Cancel
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>
