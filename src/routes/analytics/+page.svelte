@@ -61,7 +61,6 @@
 	// Order Status Distribution
 	let orderStatus = [
 		{ status: 'Processed', count: 0, color: STATUS_COLORS.Processed, percentage: 0 },
-		{ status: 'Dispatched', count: 0, color: STATUS_COLORS.Dispatched, percentage: 0 },
 		{ status: 'Pending', count: 0, color: STATUS_COLORS.Pending, percentage: 0 }
 	];
 
@@ -408,42 +407,42 @@
 			.slice(0, 10);
 
 		// Calculate Top Products by Revenue
-		const productRevenue = new Map<string, { name: string; revenue: number }>();
+		// Calculate revenue as: quantity × product price for each product variant
+		const productRevenue = new Map<string, { name: string; revenue: number; quantity: number }>();
 		
-		// Group order items by order to calculate proportional revenue
-		filteredOrders.forEach((order) => {
-			const orderItemsForOrder = filteredOrderItems.filter(oi => oi.order === order.id);
-			const totalQuantity = orderItemsForOrder.reduce((sum, oi) => sum + (oi.quantity || 0), 0);
-			const orderRevenue = order.invoice_amount || 0;
-			
-			if (totalQuantity > 0) {
-				orderItemsForOrder.forEach((item) => {
-					const product = products.find(p => p.id === item.product);
-					if (product) {
-						const key = `${product.name} ${product.size}`;
-						// Distribute revenue proportionally based on quantity
-						const itemRevenue = (orderRevenue * (item.quantity || 0)) / totalQuantity;
-						
-						const existing = productRevenue.get(key);
-						if (existing) {
-							existing.revenue += itemRevenue;
-						} else {
-							productRevenue.set(key, {
-								name: key,
-								revenue: itemRevenue
-							});
-						}
-					}
-				});
+		// Process all filtered order items
+		filteredOrderItems.forEach((item) => {
+			const product = products.find(p => p.id === item.product);
+			if (product && product.price) {
+				const productName = product.name || 'Unknown';
+				const productSize = product.size || '';
+				const key = productSize ? `${productName} ${productSize}` : productName;
+				
+				const quantity = parseInt(item.quantity) || 0;
+				const price = parseFloat(product.price) || 0;
+				const itemRevenue = quantity * price;
+				
+				const existing = productRevenue.get(key);
+				if (existing) {
+					existing.revenue += itemRevenue;
+					existing.quantity += quantity;
+				} else {
+					productRevenue.set(key, {
+						name: key,
+						revenue: itemRevenue,
+						quantity: quantity
+					});
+				}
 			}
 		});
 
-		// Convert to array, sort by revenue, and assign colors
+		// Convert to array, sort by revenue (descending), and assign colors
 		topProductsByRevenue = Array.from(productRevenue.values())
 			.sort((a, b) => b.revenue - a.revenue)
-			.slice(0, 5)
+			.slice(0, 10) // Show top 10 products
 			.map((product, index) => ({
-				...product,
+				name: product.name,
+				revenue: product.revenue,
 				color: CHART_COLORS[index % CHART_COLORS.length]
 			}));
 

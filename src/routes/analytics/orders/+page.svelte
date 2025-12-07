@@ -276,14 +276,60 @@
 			return;
 		}
 
+		// Filter out invalid items
+		const validItems = formData.items.filter(item => item.product && item.quantity);
+		
+		if (validItems.length === 0) {
+			alert('Please add at least one order item');
+			return;
+		}
+
 		try {
 			loading = true;
+			
+			// Update the order
 			await pb.collection('orders').update(selectedOrder.id, {
 				customer: formData.customer,
 				date: formData.date,
 				status: formData.status,
 				notes: formData.notes
 			});
+
+			// Get existing order items
+			const existingItems = getOrderItems(selectedOrder);
+			const existingItemIds = new Set(existingItems.map(item => item.id));
+			
+			// Update or create order items
+			for (const item of validItems) {
+				try {
+					if (item.itemId && existingItemIds.has(item.itemId)) {
+						// Update existing item
+						await pb.collection('order_items').update(item.itemId, {
+							product: item.product,
+							quantity: parseInt(item.quantity) || 1
+						});
+						existingItemIds.delete(item.itemId);
+					} else {
+						// Create new item
+						await pb.collection('order_items').create({
+							order: selectedOrder.id,
+							product: item.product,
+							quantity: parseInt(item.quantity) || 1
+						});
+					}
+				} catch (itemError) {
+					console.error('Error updating/creating order item:', itemError);
+				}
+			}
+			
+			// Delete items that were removed
+			for (const itemId of existingItemIds) {
+				try {
+					await pb.collection('order_items').delete(itemId);
+				} catch (deleteError) {
+					console.error('Error deleting order item:', deleteError);
+				}
+			}
 
 			// Real-time subscription will handle the update
 			closeEditModal();
@@ -346,13 +392,22 @@
 	function openEditModal(order: any) {
 		selectedOrder = order;
 		const customer = localCustomers.find(c => c.id === order.customer);
+		const orderItems = getOrderItems(order);
+		
+		// Load order items into form data
+		const items = orderItems.map(item => ({
+			product: item.product || '',
+			quantity: item.quantity ? item.quantity.toString() : '',
+			itemId: item.id // Store the item ID for updates
+		}));
+		
 		formData = {
 			customer: order.customer || '',
 			customerSearch: customer?.name || '',
 			date: order.date ? new Date(order.date).toISOString().split('T')[0] : new Date(order.created).toISOString().split('T')[0],
 			status: order.status || 'Pending',
 			notes: order.notes || '',
-			items: []
+			items: items
 		};
 		showEditModal = true;
 	}
@@ -929,6 +984,9 @@
 							</span>
 						</p>
 						<p class="text-sm text-gray-600"><span class="font-medium">Total Value:</span> KES {getOrderTotal(selectedOrder).toFixed(2)}</p>
+						{#if selectedOrder.notes}
+							<p class="text-sm text-gray-600 mt-2"><span class="font-medium">Comments:</span> {selectedOrder.notes}</p>
+						{/if}
 					</div>
 					{#if selectedOrderItems.length === 0}
 						<p class="text-gray-600 text-center py-8">No items in this order</p>
