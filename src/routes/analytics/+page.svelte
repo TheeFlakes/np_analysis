@@ -547,10 +547,10 @@
 <div class="min-h-screen bg-gray-50">
 	<!-- Header -->
 	<header class="bg-white border-b border-gray-200">
-		<div class="px-6 py-3">
-			<div class="flex justify-between items-start">
+		<div class="px-3 sm:px-6 py-3">
+			<div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
 				<div>
-					<h1 class="text-3xl font-bold text-gray-900">Dashboard Overview</h1>
+					<h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Dashboard Overview</h1>
 					<p class="text-gray-400 text-xs mt-1">
 						{#if dateRange === 'today'}
 							Today • Real-time business performance and insights
@@ -565,11 +565,11 @@
 						{/if}
 					</p>
 				</div>
-				<div class="flex gap-2 relative">
-					<div class="relative">
+				<div class="flex gap-2 relative w-full sm:w-auto">
+					<div class="relative flex-1 sm:flex-initial">
 						<button 
 							on:click={() => showDatePicker = !showDatePicker}
-							class="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 {dateRange === 'today' || dateRange === 'lastWeek' || dateRange === 'last30' ? 'bg-blue-50 border-blue-300' : ''}"
+							class="flex items-center justify-center gap-2 px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 w-full sm:w-auto {dateRange === 'today' || dateRange === 'lastWeek' || dateRange === 'last30' ? 'bg-blue-50 border-blue-300' : ''}"
 						>
 							📅 {dateRange === 'today' ? 'Today' : dateRange === 'lastWeek' ? 'Last Week' : dateRange === 'last30' ? 'Last 30 Days' : dateRange === 'all' ? 'All Time' : 'Custom'}
 						</button>
@@ -630,9 +630,9 @@
 	</header>
 
 	<!-- Main Content -->
-	<main class="p-6 space-y-6">
+	<main class="p-3 sm:p-6 space-y-4 sm:space-y-6">
 		<!-- 1️⃣ Top KPI Cards -->
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
 			{#each kpis as kpi}
 				<div class="{kpi.color} rounded-lg border border-gray-200 p-4 flex flex-col">
 					<div class="flex justify-between items-start flex-1">
@@ -676,7 +676,7 @@
 		</div>
 
 		<!-- 2️⃣ Sales Performance Charts -->
-		<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
 			<!-- Product Mix Chart -->
 			<div class="bg-white rounded-lg border border-gray-200 p-4">
 			<div class="flex items-center gap-2 mb-4">
@@ -732,7 +732,7 @@
 			</div>
 
 			<!-- Orders Over Time Chart -->
-			<div class="bg-white rounded-lg border border-gray-200 p-4">
+			<div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
 			<div class="flex items-center gap-2 mb-4">
 				<svg class="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 24 24"><path d="M3 13h2v8H3zm4-8h2v16H7zm4-2h2v18h-2zm4 4h2v14h-2zm4-2h2v16h-2z"/></svg>
 				<h3 class="text-sm font-semibold text-gray-900">Revenue Trend (Daily)</h3>
@@ -911,8 +911,8 @@
 				<h3 class="text-sm font-semibold text-gray-900">Order Status Distribution</h3>
 			</div>
 			{#if orderStatus.some(s => s.count > 0)}
-				<div class="flex items-center justify-center h-32 relative">
-					<svg class="w-24 h-24" viewBox="0 0 160 160">
+				<div class="flex items-center justify-center h-64 relative">
+					<svg class="w-48 h-48" viewBox="0 0 160 160">
 						{#each orderStatus as status, i}
 							{@const circumference = 188.4}
 							{@const strokeDash = (status.percentage / 100) * circumference}
@@ -941,7 +941,7 @@
 					{/if}
 				</div>
 			{:else}
-				<div class="flex items-center justify-center h-32 text-gray-500">
+				<div class="flex items-center justify-center h-64 text-gray-500">
 					<p>No status data available</p>
 				</div>
 			{/if}

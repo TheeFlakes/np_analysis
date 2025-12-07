@@ -47,7 +47,7 @@
 		date: new Date().toISOString().split('T')[0],
 		status: 'Pending',
 		notes: '',
-		items: [] as Array<{ product: string; quantity: string }>
+		items: [] as Array<{ product: string; quantity: string; itemId?: string }>
 	};
 
 	// Customer search
@@ -471,17 +471,17 @@
 	}
 </script>
 
-<div class="min-h-screen bg-gray-50 p-6">
+<div class="min-h-screen bg-gray-50 p-3 sm:p-6">
 	<div class="max-w-7xl mx-auto">
 		<!-- Header -->
-		<div class="flex items-center justify-between mb-8">
+		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
 			<div>
-				<h1 class="text-3xl font-bold text-gray-900">Orders</h1>
-				<p class="text-gray-600 mt-1">Manage all your orders in one place</p>
+				<h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Orders</h1>
+				<p class="text-sm sm:text-base text-gray-600 mt-1">Manage all your orders in one place</p>
 			</div>
 			<button
 				on:click={openCreateModal}
-				class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+				class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 w-full sm:w-auto"
 			>
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -491,20 +491,20 @@
 		</div>
 
 		<!-- Search and Filter Bar -->
-		<div class="bg-white rounded-lg shadow-sm p-4 mb-6">
-			<div class="flex flex-col md:flex-row gap-4">
+		<div class="bg-white rounded-lg shadow-sm p-3 sm:p-4 mb-4 sm:mb-6">
+			<div class="flex flex-col gap-3 sm:gap-4">
 				<div class="flex-1">
 					<input
 						type="text"
 						placeholder="Search by customer, date, or status..."
 						bind:value={searchQuery}
-						class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 					/>
 				</div>
-				<div class="flex gap-2">
+				<div class="flex flex-col sm:flex-row gap-2">
 					<select
 						bind:value={statusFilter}
-						class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="flex-1 px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 					>
 						<option value="all">All Status</option>
 						<option value="Pending">Pending</option>
@@ -513,7 +513,7 @@
 					</select>
 					<select
 						bind:value={sortBy}
-						class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="flex-1 px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 					>
 						<option value="created">Sort by Date</option>
 						<option value="customer">Sort by Customer</option>
@@ -521,7 +521,7 @@
 					</select>
 					<button
 						on:click={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')}
-						class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+						class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center sm:justify-start"
 						title="Toggle sort order"
 					>
 						<svg
@@ -558,8 +558,8 @@
 				</p>
 			</div>
 		{:else}
-			<!-- Orders Table -->
-			<div class="bg-white rounded-lg shadow-sm overflow-hidden">
+			<!-- Orders Table - Desktop -->
+			<div class="hidden md:block bg-white rounded-lg shadow-sm overflow-hidden">
 				<div class="overflow-x-auto">
 					<table class="w-full">
 						<thead>
@@ -627,13 +627,70 @@
 					</table>
 				</div>
 			</div>
+
+			<!-- Orders Cards - Mobile -->
+			<div class="md:hidden space-y-4">
+				{#each filteredOrders as order (order.id)}
+					<div class="bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+						<div class="flex items-start justify-between mb-3">
+							<div class="flex-1">
+								<h3 class="text-base font-semibold text-gray-900">{getCustomerName(order)}</h3>
+								<p class="text-sm text-gray-600 mt-1">
+									{new Date(order.date || order.created).toLocaleDateString('en-US', { 
+										year: 'numeric', 
+										month: 'short', 
+										day: 'numeric' 
+									})}
+								</p>
+							</div>
+							<span class="px-2 py-1 rounded text-xs font-semibold {getStatusColor(order.status || 'Pending')}">
+								{order.status || 'Pending'}
+							</span>
+						</div>
+						<div class="grid grid-cols-2 gap-3 mb-3 text-sm">
+							<div>
+								<p class="text-gray-500">Items</p>
+								<p class="font-medium text-gray-900">{getOrderItems(order).length} item(s)</p>
+							</div>
+							<div>
+								<p class="text-gray-500">Quantity</p>
+								<p class="font-medium text-gray-900">{getTotalQuantity(order)}</p>
+							</div>
+							<div class="col-span-2">
+								<p class="text-gray-500">Total Value</p>
+								<p class="font-semibold text-gray-900">KES {getOrderTotal(order).toFixed(2)}</p>
+							</div>
+						</div>
+						<div class="flex gap-2 pt-3 border-t border-gray-200">
+							<button
+								on:click={() => openOrderItemsModal(order)}
+								class="flex-1 text-blue-600 hover:text-blue-900 font-medium transition-colors text-sm py-2 text-center"
+							>
+								View
+							</button>
+							<button
+								on:click={() => openEditModal(order)}
+								class="flex-1 text-green-600 hover:text-green-900 font-medium transition-colors text-sm py-2 text-center"
+							>
+								Edit
+							</button>
+							<button
+								on:click={() => openDeleteConfirm(order)}
+								class="flex-1 text-red-600 hover:text-red-900 font-medium transition-colors text-sm py-2 text-center"
+							>
+								Delete
+							</button>
+						</div>
+					</div>
+				{/each}
+			</div>
 		{/if}
 	</div>
 
 	<!-- Create Modal - Fast Entry Card -->
 	{#if showCreateModal}
 		<div 
-			class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto" 
+			class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto" 
 			on:click={handleClickOutside}
 			on:keydown={(e) => e.key === 'Escape' && closeCreateModal()}
 			role="dialog"
@@ -642,7 +699,7 @@
 			tabindex="-1"
 		>
 			<div 
-				class="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8" 
+				class="bg-white rounded-lg shadow-xl max-w-2xl w-full my-2 sm:my-8 max-h-[95vh] overflow-y-auto" 
 				on:click|stopPropagation
 				role="document"
 			>
@@ -660,7 +717,7 @@
 					</button>
 				</div>
 
-				<form on:submit|preventDefault={createOrder} class="p-6 space-y-4">
+				<form on:submit|preventDefault={createOrder} class="p-4 sm:p-6 space-y-4">
 					<!-- Customer -->
 					<div>
 						<label for="create-customer" class="block text-sm font-medium text-gray-700 mb-1">Customer *</label>
@@ -717,7 +774,7 @@
 					</div>
 
 					<!-- Date and Status -->
-					<div class="grid grid-cols-2 gap-4">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 						<div>
 							<label for="create-date" class="block text-sm font-medium text-gray-700 mb-1">Date *</label>
 							<input
@@ -841,9 +898,9 @@
 
 	<!-- Edit Modal -->
 	{#if showEditModal}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-			<div class="bg-white rounded-lg shadow-lg max-w-md w-full max-h-screen overflow-y-auto">
-				<div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+			<div class="bg-white rounded-lg shadow-lg max-w-md w-full max-h-[95vh] overflow-y-auto">
+				<div class="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-4 flex items-center justify-between">
 					<h2 class="text-xl font-bold text-gray-900">Edit Order</h2>
 					<button
 						on:click={closeEditModal}
@@ -855,7 +912,7 @@
 						</svg>
 					</button>
 				</div>
-				<form on:submit|preventDefault={updateOrder} class="p-6 space-y-4">
+				<form on:submit|preventDefault={updateOrder} class="p-4 sm:p-6 space-y-4">
 					<div>
 						<label for="edit-customer" class="block text-sm font-medium text-gray-900 mb-1">Customer *</label>
 						<select
@@ -903,6 +960,69 @@
 							class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 						></textarea>
 					</div>
+
+					<!-- Order Items -->
+					<div class="mb-6">
+						<div class="flex items-center justify-between mb-3">
+							<span class="block text-sm font-semibold text-gray-700">Order Items</span>
+							<button
+								type="button"
+								on:click={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									addItemRow();
+								}}
+								class="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-1"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+								</svg>
+								Add Item
+							</button>
+						</div>
+						<div class="max-h-96 overflow-y-auto space-y-3 pr-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+							{#each formData.items as item, index (index)}
+								<div class="flex gap-3 items-center p-3 bg-white rounded-lg border border-gray-200 shadow-sm">
+									<div class="flex-1">
+										<select
+											bind:value={item.product}
+											class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+										>
+											<option value="">Select Product</option>
+											{#each localProducts as product}
+												<option value={product.id}>
+													{product.name}{product.size ? ` ${product.size}` : ''}
+												</option>
+											{/each}
+										</select>
+									</div>
+									<div class="w-32">
+										<input
+											type="number"
+											bind:value={item.quantity}
+											placeholder="Quantity"
+											min="1"
+											class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+										/>
+									</div>
+									<button
+										type="button"
+										on:click={() => removeItemRow(index)}
+										class="text-red-600 hover:text-red-800 transition-colors p-2"
+										title="Remove item"
+									>
+										<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+										</svg>
+									</button>
+								</div>
+							{/each}
+							{#if formData.items.length === 0}
+								<p class="text-sm text-gray-500 text-center py-4">Click "Add Item" to add products to this order</p>
+							{/if}
+						</div>
+					</div>
+
 					<div class="flex gap-3 pt-4">
 						<button
 							type="submit"
@@ -927,7 +1047,7 @@
 	<!-- Delete Confirmation Modal -->
 	{#if showDeleteConfirm}
 		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-			<div class="bg-white rounded-lg shadow-lg max-w-sm w-full">
+			<div class="bg-white rounded-lg shadow-lg max-w-sm w-full mx-4">
 				<div class="p-6">
 					<div class="flex items-center justify-center w-12 h-12 mx-auto bg-red-100 rounded-full mb-4">
 						<svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -974,8 +1094,8 @@
 						</svg>
 					</button>
 				</div>
-				<div class="p-6">
-					<div class="mb-4 p-4 bg-gray-50 rounded-lg">
+				<div class="p-4 sm:p-6">
+					<div class="mb-4 p-3 sm:p-4 bg-gray-50 rounded-lg">
 						<p class="text-sm text-gray-600"><span class="font-medium">Customer:</span> {getCustomerName(selectedOrder)}</p>
 						<p class="text-sm text-gray-600"><span class="font-medium">Date:</span> {new Date(selectedOrder.date || selectedOrder.created).toLocaleDateString()}</p>
 						<p class="text-sm text-gray-600"><span class="font-medium">Status:</span> 
@@ -984,9 +1104,10 @@
 							</span>
 						</p>
 						<p class="text-sm text-gray-600"><span class="font-medium">Total Value:</span> KES {getOrderTotal(selectedOrder).toFixed(2)}</p>
-						{#if selectedOrder.notes}
-							<p class="text-sm text-gray-600 mt-2"><span class="font-medium">Comments:</span> {selectedOrder.notes}</p>
-						{/if}
+						<p class="text-sm text-gray-600 mt-2">
+							<span class="font-medium">Comments:</span> 
+							<span class={selectedOrder.notes ? '' : 'text-gray-400 italic'}>{selectedOrder.notes || 'No comments'}</span>
+						</p>
 					</div>
 					{#if selectedOrderItems.length === 0}
 						<p class="text-gray-600 text-center py-8">No items in this order</p>
@@ -1008,19 +1129,19 @@
 										{@const price = parseFloat(product?.price || 0)}
 										{@const total = quantity * price}
 										<tr class="hover:bg-gray-50">
-											<td class="px-4 py-3 text-sm text-gray-900">
+											<td class="px-2 sm:px-4 py-3 text-xs sm:text-sm text-gray-900">
 												{product?.name || 'Unknown'} {product?.size ? `(${product.size})` : ''}
 											</td>
-											<td class="px-4 py-3 text-sm text-gray-600">{quantity}</td>
-											<td class="px-4 py-3 text-sm text-gray-600">KES {price.toFixed(2)}</td>
-											<td class="px-4 py-3 text-sm text-gray-900 font-semibold">KES {total.toFixed(2)}</td>
+											<td class="px-2 sm:px-4 py-3 text-xs sm:text-sm text-gray-600">{quantity}</td>
+											<td class="px-2 sm:px-4 py-3 text-xs sm:text-sm text-gray-600">KES {price.toFixed(2)}</td>
+											<td class="px-2 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 font-semibold">KES {total.toFixed(2)}</td>
 										</tr>
 									{/each}
 								</tbody>
 								<tfoot>
 									<tr class="bg-gray-50 border-t-2 border-gray-300">
-										<td colspan="3" class="px-4 py-3 text-right text-sm font-semibold text-gray-900">Total:</td>
-										<td class="px-4 py-3 text-sm font-bold text-gray-900">KES {getOrderTotal(selectedOrder).toFixed(2)}</td>
+										<td colspan="3" class="px-2 sm:px-4 py-3 text-right text-xs sm:text-sm font-semibold text-gray-900">Total:</td>
+										<td class="px-2 sm:px-4 py-3 text-xs sm:text-sm font-bold text-gray-900">KES {getOrderTotal(selectedOrder).toFixed(2)}</td>
 									</tr>
 								</tfoot>
 							</table>

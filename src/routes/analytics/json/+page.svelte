@@ -503,12 +503,12 @@
 	};
 </script>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 p-6">
+<div class="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50 p-3 sm:p-6">
 	<div class="max-w-6xl mx-auto">
 		<!-- Header -->
-		<div class="mb-6">
-			<h1 class="text-3xl font-bold text-gray-900 mb-2">JSON Management</h1>
-			<p class="text-gray-600">
+		<div class="mb-4 sm:mb-6">
+			<h1 class="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">JSON Management</h1>
+			<p class="text-sm sm:text-base text-gray-600">
 				Upload or export JSON data for your tables. You can paste JSON records and update them to the database in real-time.
 			</p>
 		</div>
@@ -525,11 +525,11 @@
 		{/if}
 
 		<!-- Tabs -->
-		<div class="flex gap-2 mb-6 overflow-x-auto">
+		<div class="flex gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2">
 			{#each tables as table}
 				<button
 					on:click={() => (activeTab = table.id)}
-					class="px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap {activeTab === table.id
+					class="px-3 sm:px-4 py-2 rounded-lg text-sm sm:text-base font-medium transition-all whitespace-nowrap {activeTab === table.id
 						? 'bg-blue-600 text-white shadow-md'
 						: 'bg-white text-gray-700 border border-gray-200 hover:border-blue-300'}"
 				>
@@ -539,51 +539,51 @@
 		</div>
 
 		<!-- Main Content -->
-		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
 			<!-- JSON Input Area -->
 			<div class="lg:col-span-2">
-				<div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 h-full">
+				<div class="bg-white rounded-lg border border-gray-200 shadow-sm p-3 sm:p-4 h-full">
 					<div class="flex items-center justify-between mb-3">
-						<h2 class="text-lg font-semibold text-gray-900">
+						<h2 class="text-base sm:text-lg font-semibold text-gray-900">
 							{tables.find(t => t.id === activeTab)?.name} JSON
 						</h2>
 						<div class="text-xs text-gray-500">
-							{jsonInputs[activeTab].length} characters
+							{jsonInputs[activeTab].length} chars
 						</div>
 					</div>
 
 					<textarea
 						bind:value={jsonInputs[activeTab]}
 						placeholder={`Paste your JSON array or object here. Example:\n[\n  {\n    "name": "John",\n    "email": "john@example.com"\n  }\n]`}
-						class="w-full h-96 p-3 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+						class="w-full h-64 sm:h-96 p-3 border border-gray-300 rounded-lg font-mono text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
 					></textarea>
 
-					<div class="mt-3 flex gap-2 flex-wrap">
+					<div class="mt-3 flex flex-col sm:flex-row gap-2">
 						<button
 							on:click={activeTab === 'orders' ? uploadJSONWithLookup : uploadJSON}
 							disabled={loading}
-							class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+							class="flex-1 px-3 sm:px-4 py-2 text-sm sm:text-base bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
 						>
 							{loading ? 'Uploading...' : 'Upload to DB'}
 						</button>
 						<button
 							on:click={exportTable}
 							disabled={loading}
-							class="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+							class="flex-1 px-3 sm:px-4 py-2 text-sm sm:text-base bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
 						>
 							{loading ? 'Exporting...' : 'Export Table'}
 						</button>
 						<button
 							on:click={copyToClipboard}
 							disabled={!jsonInputs[activeTab].trim()}
-							class="px-4 py-2 bg-gray-600 text-white rounded-lg font-medium hover:bg-gray-700 disabled:opacity-50 transition-colors"
+							class="px-3 sm:px-4 py-2 text-sm sm:text-base bg-gray-600 text-white rounded-lg font-medium hover:bg-gray-700 disabled:opacity-50 transition-colors"
 							title="Copy JSON to clipboard"
 						>
 							Copy
 						</button>
 						<button
 							on:click={clearInput}
-							class="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+							class="px-3 sm:px-4 py-2 text-sm sm:text-base bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
 						>
 							Clear
 						</button>
@@ -613,7 +613,7 @@
 				</div>
 
 				<!-- Instructions -->
-				<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+				<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
 					<h3 class="text-sm font-semibold text-blue-900 mb-2">Instructions</h3>
 					<ol class="text-xs text-blue-800 space-y-1 list-decimal list-inside">
 						<li>Select a table from the tabs above</li>
@@ -641,7 +641,7 @@
 				</div>
 
 				<!-- Quick Stats -->
-				<div class="bg-slate-50 border border-slate-200 rounded-lg p-4">
+				<div class="bg-slate-50 border border-slate-200 rounded-lg p-3 sm:p-4">
 					<h3 class="text-sm font-semibold text-gray-900 mb-2">Stats</h3>
 					<div class="text-xs text-gray-600 space-y-1">
 						<p>Current input: <span class="font-semibold">{jsonInputs[activeTab].length} chars</span></p>

@@ -211,17 +211,17 @@
 	}
 </script>
 
-<div class="min-h-screen bg-gray-50 p-6">
+<div class="min-h-screen bg-gray-50 p-3 sm:p-6">
 	<div class="max-w-7xl mx-auto">
 		<!-- Header -->
-		<div class="flex items-center justify-between mb-8">
+		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
 			<div>
-				<h1 class="text-3xl font-bold text-gray-900">Products</h1>
-				<p class="text-gray-600 mt-1">Manage all your products in one place</p>
+				<h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Products</h1>
+				<p class="text-sm sm:text-base text-gray-600 mt-1">Manage all your products in one place</p>
 			</div>
 			<button
 				on:click={openCreateModal}
-				class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+				class="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 w-full sm:w-auto"
 			>
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -231,20 +231,20 @@
 		</div>
 
 		<!-- Search and Filter Bar -->
-		<div class="bg-white rounded-lg shadow-sm p-4 mb-6">
-			<div class="flex flex-col md:flex-row gap-4">
+		<div class="bg-white rounded-lg shadow-sm p-3 sm:p-4 mb-4 sm:mb-6">
+			<div class="flex flex-col gap-3 sm:gap-4">
 				<div class="flex-1">
 					<input
 						type="text"
 						placeholder="Search by name, size, or description..."
 						bind:value={searchQuery}
-						class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 					/>
 				</div>
-				<div class="flex gap-2">
+				<div class="flex flex-col sm:flex-row gap-2">
 					<select
 						bind:value={sortBy}
-						class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="flex-1 sm:flex-initial px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 					>
 						<option value="created">Sort by Date</option>
 						<option value="name">Sort by Name</option>
@@ -252,7 +252,7 @@
 					</select>
 					<button
 						on:click={() => (sortOrder = sortOrder === 'asc' ? 'desc' : 'asc')}
-						class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+						class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center sm:justify-start"
 						title="Toggle sort order"
 					>
 						<svg
@@ -338,8 +338,8 @@
 
 	<!-- Create Modal -->
 	{#if showCreateModal}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-			<div class="bg-white rounded-lg shadow-lg max-w-md w-full max-h-screen overflow-y-auto">
+		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+			<div class="bg-white rounded-lg shadow-lg max-w-md w-full max-h-[95vh] overflow-y-auto">
 				<div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
 					<h2 class="text-xl font-bold text-gray-900">Add New Product</h2>
 					<button
@@ -352,7 +352,7 @@
 						</svg>
 					</button>
 				</div>
-				<form on:submit|preventDefault={createProduct} class="p-6 space-y-4">
+				<form on:submit|preventDefault={createProduct} class="p-4 sm:p-6 space-y-4">
 					<div>
 						<label for="create-name" class="block text-sm font-medium text-gray-900 mb-1">Name *</label>
 						<input
@@ -420,8 +420,8 @@
 
 	<!-- Edit Modal -->
 	{#if showEditModal}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-			<div class="bg-white rounded-lg shadow-lg max-w-md w-full max-h-screen overflow-y-auto">
+		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+			<div class="bg-white rounded-lg shadow-lg max-w-md w-full max-h-[95vh] overflow-y-auto">
 				<div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
 					<h2 class="text-xl font-bold text-gray-900">Edit Product</h2>
 					<button
@@ -503,7 +503,7 @@
 	<!-- Delete Confirmation Modal -->
 	{#if showDeleteConfirm}
 		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-			<div class="bg-white rounded-lg shadow-lg max-w-sm w-full">
+			<div class="bg-white rounded-lg shadow-lg max-w-sm w-full mx-4">
 				<div class="p-6">
 					<div class="flex items-center justify-center w-12 h-12 mx-auto bg-red-100 rounded-full mb-4">
 						<svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
